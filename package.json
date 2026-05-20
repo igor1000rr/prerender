@@ -8,7 +8,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "prerender": "^7.4.1",
+    "prerender": "^5.21.6",
     "prerender-memory-cache": "^0.4.0"
   },
   "engines": {
