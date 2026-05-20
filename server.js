@@ -11,9 +11,18 @@
 
 const prerender = require('prerender');
 
+// Путь к Chromium внутри образа (системный из apt, см. Dockerfile).
+// PUPPETEER_EXECUTABLE_PATH не работает с prerender — он не использует puppeteer
+// в прямую, а запускает Chrome через child_process с указанным chromeLocation.
+const CHROME_PATH = process.env.CHROME_PATH || '/usr/bin/chromium';
+
 const server = prerender({
   // Порт внутри контейнера, наружу не публикуется — общение через docker network
   port: 3000,
+
+  // Критично: prerender ищет Chrome в нескольких стандартных местах,
+  // но в debian-slim Chromium в /usr/bin/chromium, в список не входит — указываем явно.
+  chromeLocation: CHROME_PATH,
 
   // Таймаут на одну страницу. 30 сек хватит для тяжёлых SPA, дальше — 504
   pageDoneCheckTimeout: 500,
@@ -32,13 +41,11 @@ const server = prerender({
     '--hide-scrollbars',
   ],
 
-  // Чище память: убиваем вкладку после каждого рендера, не переиспользуем
   followRedirects: true,
   logRequests: process.env.LOG_REQUESTS === '1',
 });
 
-// In-memory кэш на 1 час. Если бот долбит одну и ту же страницу — отдаём
-// мгновенно из кэша. Cache TTL берём из env (по умолчанию 1 час).
+// In-memory кэш. CACHE_TTL/CACHE_MAXSIZE — это env-переменные самого плагина.
 const cacheTtl = parseInt(process.env.CACHE_TTL_SECONDS || '3600', 10);
 process.env.CACHE_MAXSIZE = process.env.CACHE_MAXSIZE || '1000';
 process.env.CACHE_TTL = String(cacheTtl);
@@ -52,7 +59,7 @@ server.use(prerender.httpHeaders());
 
 server.start();
 
-console.log('[prerender] started on :3000, cache TTL=' + cacheTtl + 's');
+console.log('[prerender] started on :3000, cache TTL=' + cacheTtl + 's, Chrome=' + CHROME_PATH);
 
 // Graceful shutdown — даём Chrome закрыться корректно
 process.on('SIGTERM', () => {
