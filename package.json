@@ -1,0 +1,17 @@
+{
+  "name": "prerender-vibecoding",
+  "version": "1.0.0",
+  "description": "Self-hosted prerender для SEO ботов SPA-сайтов (vibecoding, grodno, tonforge)",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "prerender": "^7.4.1",
+    "prerender-memory-cache": "^0.4.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
