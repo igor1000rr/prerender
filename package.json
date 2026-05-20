@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "prerender": "^5.21.6",
-    "prerender-memory-cache": "^0.4.0"
+    "prerender-memory-cache": "^1.0.2"
   },
   "engines": {
     "node": ">=20"
