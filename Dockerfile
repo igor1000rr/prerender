@@ -1,4 +1,6 @@
-# Сборка prerender на основе Node 20 + системный Chromium из apt.
+# Prerender v2: Node 20 + puppeteer-core + системный Chromium.
+# Puppeteer-core НЕ скачивает свой Chromium (в отличие от puppeteer),
+# экономим ~300MB и используем apt-версию.
 
 FROM node:20-bookworm-slim
 
@@ -22,7 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libxkbcommon0 \
       libxrandr2 \
       tini \
-      wget \
       curl \
       netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
@@ -33,13 +34,11 @@ RUN groupadd -r chrome && useradd -r -g chrome -G audio,video chrome \
 
 WORKDIR /app
 
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    NODE_ENV=production \
+ENV NODE_ENV=production \
+    CHROME_PATH=/usr/bin/chromium \
     PORT=3000
 
 COPY --chown=chrome:chrome package.json ./
-
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY --chown=chrome:chrome server.js ./
@@ -48,12 +47,9 @@ USER chrome
 
 EXPOSE 3000
 
-# Healthcheck: пререндер отвечает 400 на GET / (пустой URL — ожидаемое поведение).
-# Нам нужно проверить что процесс вообще живой и принимает TCP на 3000.
-# nc -z — простой TCP-knock, возвращает 0 если порт принимает соединения.
-# Это быстрее и надёжнее чем парсинг HTTP-ответа.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD nc -z 127.0.0.1 3000 || exit 1
+# Healthcheck — свой endpoint /health возвращает 200 OK.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://localhost:3000/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "server.js"]
