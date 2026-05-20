@@ -1,19 +1,7 @@
-# Сборка prerender на основе Node 20 + Chromium из puppeteer.
-# Цель — минимальный образ, без лишних dev-зависимостей, с быстрым стартом.
-#
-# Why node:20-bookworm-slim (а не alpine):
-# Chromium под alpine — боль и бесполезные сборки. Debian-based stable.
-#
-# Why we install chromium отдельным пакетом, а не через puppeteer:
-# puppeteer по умолчанию скачивает свою версию Chromium (~300MB).
-# Мы пропускаем это через PUPPETEER_SKIP_CHROMIUM_DOWNLOAD и используем
-# системный пакет chromium-from-debian — экономия диска и свежие security patches
-# через apt.
+# Сборка prerender на основе Node 20 + системный Chromium из apt.
 
 FROM node:20-bookworm-slim
 
-# Системный Chromium + все runtime-зависимости для него
-# (фонты, libs, GTK и т.п.).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       ca-certificates \
@@ -36,18 +24,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tini \
       wget \
       curl \
+      netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# Не запускаем от root — puppeteer всё равно вынуждено бы лезть с --no-sandbox.
-# Создаём юзера chrome и под ним запускаем.
 RUN groupadd -r chrome && useradd -r -g chrome -G audio,video chrome \
     && mkdir -p /home/chrome/Downloads /app \
     && chown -R chrome:chrome /home/chrome /app
 
 WORKDIR /app
 
-# Говорим puppeteer (транзитивная зависимость prerender), не качать свой Chromium
-# и использовать системный.
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
     NODE_ENV=production \
@@ -55,9 +40,6 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
 
 COPY --chown=chrome:chrome package.json ./
 
-# npm install вместо npm ci: в репо нет package-lock.json (проект новый),
-# в ci это было бы проблемой, для прода-сборки одноразовой — ok.
-# Лок создастся внутри build context и останется в образе.
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY --chown=chrome:chrome server.js ./
@@ -66,11 +48,12 @@ USER chrome
 
 EXPOSE 3000
 
-# Healthcheck — prerender отвечает 200 на GET / (с подсказкой как использовать).
-# start-period 30s — время на старт Chromium-процесса.
+# Healthcheck: пререндер отвечает 400 на GET / (пустой URL — ожидаемое поведение).
+# Нам нужно проверить что процесс вообще живой и принимает TCP на 3000.
+# nc -z — простой TCP-knock, возвращает 0 если порт принимает соединения.
+# Это быстрее и надёжнее чем парсинг HTTP-ответа.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD curl -fsS http://localhost:3000/ || exit 1
+  CMD nc -z 127.0.0.1 3000 || exit 1
 
-# tini как init-процесс — правильно реапит зомби-Chromiumы и ловит SIGTERM
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "server.js"]
