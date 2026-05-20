@@ -3,35 +3,36 @@
 // Слушает на :3000, принимает запросы вида GET /https://example.com/some/path,
 // рендерит страницу в headless Chromium, отдаёт готовый HTML без JS.
 //
-// Кэширование в памяти на 1 час (prerender-memory-cache) — снижает нагрузку
-// на CPU/RAM, особенно когда боты долбят пачкой.
+// ВАЖНО: prerender 5.x имеет баг — если передать свои chromeFlags, он НЕ
+// добавляет --remote-debugging-port автоматически. См. lib/browsers/chrome.js:
+//   let chromeFlags = this.options.chromeFlags || [
+//     '--headless', '--disable-gpu', '--remote-debugging-port=...', '--hide-scrollbars'
+//   ];
+// Т.е. в наших chromeFlags НАДО явно включить --remote-debugging-port=9222
+// или брать порт из browserDebuggingPort из prerender.
 //
-// Внимание: процесс ОДИН на контейнер. Если упал — рестарт за счёт Docker
-// (restart policy: on-failure:5). Никаких бесконечных рестарт-петель.
+// Кэширование в памяти на 1 час (prerender-memory-cache).
 
 const prerender = require('prerender');
 
-// Путь к Chromium внутри образа (системный из apt, см. Dockerfile).
-// PUPPETEER_EXECUTABLE_PATH не работает с prerender — он не использует puppeteer
-// в прямую, а запускает Chrome через child_process с указанным chromeLocation.
 const CHROME_PATH = process.env.CHROME_PATH || '/usr/bin/chromium';
+const DEBUG_PORT = parseInt(process.env.BROWSER_DEBUGGING_PORT || '9222', 10);
 
 const server = prerender({
-  // Порт внутри контейнера, наружу не публикуется — общение через docker network
   port: 3000,
-
-  // Критично: prerender ищет Chrome в нескольких стандартных местах,
-  // но в debian-slim Chromium в /usr/bin/chromium, в список не входит — указываем явно.
   chromeLocation: CHROME_PATH,
+  browserDebuggingPort: DEBUG_PORT,
 
-  // Таймаут на одну страницу. 30 сек хватит для тяжёлых SPA, дальше — 504
   pageDoneCheckTimeout: 500,
   pageLoadTimeout: 30 * 1000,
   waitAfterLastRequest: 500,
 
-  // Ограничиваем число параллельных Chrome-вкладок, чтоб не съесть всю память.
-  // На 1.5G лимита контейнера разумно 2-3 параллельных страницы.
+  // КРИТИЧНО: включаем --remote-debugging-port явно, prerender его НЕ добавит
+  // автоматически к нашим кастомным флагам (см. выше).
+  // И --headless тоже обязательно — иначе Chrome ждёт display.
   chromeFlags: [
+    '--headless',
+    '--remote-debugging-port=' + DEBUG_PORT,
     '--no-sandbox',
     '--disable-gpu',
     '--disable-dev-shm-usage',
@@ -39,13 +40,17 @@ const server = prerender({
     '--no-zygote',
     '--single-process',
     '--hide-scrollbars',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-default-apps',
+    '--mute-audio',
   ],
 
   followRedirects: true,
   logRequests: process.env.LOG_REQUESTS === '1',
 });
 
-// In-memory кэш. CACHE_TTL/CACHE_MAXSIZE — это env-переменные самого плагина.
+// In-memory кэш
 const cacheTtl = parseInt(process.env.CACHE_TTL_SECONDS || '3600', 10);
 process.env.CACHE_MAXSIZE = process.env.CACHE_MAXSIZE || '1000';
 process.env.CACHE_TTL = String(cacheTtl);
@@ -59,9 +64,11 @@ server.use(prerender.httpHeaders());
 
 server.start();
 
-console.log('[prerender] started on :3000, cache TTL=' + cacheTtl + 's, Chrome=' + CHROME_PATH);
+console.log(
+  '[prerender] started on :3000, cache TTL=' + cacheTtl + 's, ' +
+  'Chrome=' + CHROME_PATH + ', debugPort=' + DEBUG_PORT
+);
 
-// Graceful shutdown — даём Chrome закрыться корректно
 process.on('SIGTERM', () => {
   console.log('[prerender] SIGTERM, shutting down');
   process.exit(0);
