@@ -53,8 +53,12 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     NODE_ENV=production \
     PORT=3000
 
-COPY --chown=chrome:chrome package.json package-lock.json* ./
-RUN npm ci --omit=dev && npm cache clean --force
+COPY --chown=chrome:chrome package.json ./
+
+# npm install вместо npm ci: в репо нет package-lock.json (проект новый),
+# в ci это было бы проблемой, для прода-сборки одноразовой — ok.
+# Лок создастся внутри build context и останется в образе.
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 
 COPY --chown=chrome:chrome server.js ./
 
